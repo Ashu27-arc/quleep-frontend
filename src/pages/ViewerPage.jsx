@@ -11,6 +11,7 @@ import { ArrowLeft, Box, Copy, ExternalLink, ShieldCheck, Check, Calendar, Corne
 export const ViewerPage = () => {
   const { id } = useParams();
   const [model, setModel] = useState(null);
+  const [signedModelUrl, setSignedModelUrl] = useState(null);
   const [initialState, setInitialState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -20,12 +21,15 @@ export const ViewerPage = () => {
   const fetchModelAndState = useCallback(async () => {
     try {
       setLoading(true);
-      const [modelRes, stateRes] = await Promise.all([
+      const [modelRes, stateRes, signedRes] = await Promise.all([
         api.get(`/models/${id}`),
         api.get(`/models/${id}/state`),
+        api.get(`/models/${id}/signed-url`),
       ]);
       setModel(modelRes.data);
       setInitialState(stateRes.data);
+      // Use the pre-signed URL so Three.js can fetch the private S3 asset
+      setSignedModelUrl(signedRes.data.signedUrl || resolveAssetUrl(modelRes.data.modelUrl));
     } catch (err) {
       console.error('Error fetching model context:', err);
       setToastMessage({ message: 'Failed to stream 3D object details.', type: 'error' });
@@ -56,6 +60,7 @@ export const ViewerPage = () => {
 
   const handleCopyUrl = () => {
     if (!model) return;
+    // Copy the raw S3 URL (without signature) for sharing
     const fileUrl = resolveAssetUrl(model.modelUrl);
     navigator.clipboard.writeText(fileUrl);
     setCopied(true);
@@ -66,7 +71,8 @@ export const ViewerPage = () => {
   const handleDownload = async () => {
     if (!model) return;
     try {
-      const fileUrl = resolveAssetUrl(model.modelUrl);
+      // Use the signed URL for the actual download fetch (private S3 requires authentication)
+      const fileUrl = signedModelUrl || resolveAssetUrl(model.modelUrl);
       const response = await fetch(fileUrl);
       if (!response.ok) throw new Error('Network response was not ok');
       const blob = await response.blob();
@@ -109,7 +115,8 @@ export const ViewerPage = () => {
     );
   }
 
-  const finalModelUrl = resolveAssetUrl(model.modelUrl);
+  // Use the pre-signed S3 URL (avoids 403 on private buckets); fallback to resolved URL
+  const finalModelUrl = signedModelUrl || resolveAssetUrl(model.modelUrl);
 
   return (
     <div className="flex-1 flex flex-col gap-6 animate-fade-in relative z-10">
