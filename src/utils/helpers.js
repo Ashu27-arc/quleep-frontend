@@ -56,6 +56,6 @@ export const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 export const resolveAssetUrl = (url) => {
   if (!url) return '';
   if (url.startsWith('http')) return url;
-  const base = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000';
+  const base = import.meta.env.VITE_API_URL?.replace('/api', '') || 'https://quleep-backend-e33h.onrender.com';
   return `${base}${url}`;
 };
