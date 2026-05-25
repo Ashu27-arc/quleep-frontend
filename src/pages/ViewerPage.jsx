@@ -29,7 +29,7 @@ export const ViewerPage = () => {
       setModel(modelRes.data);
       setInitialState(stateRes.data);
       // Use the pre-signed URL so Three.js can fetch the private S3 asset
-      setSignedModelUrl(signedRes.data.signedUrl || resolveAssetUrl(modelRes.data.modelUrl));
+      setSignedModelUrl(resolveAssetUrl(signedRes.data.signedUrl || modelRes.data.modelUrl));
     } catch (err) {
       console.error('Error fetching model context:', err);
       setToastMessage({ message: 'Failed to stream 3D object details.', type: 'error' });
