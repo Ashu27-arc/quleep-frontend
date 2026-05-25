@@ -5,6 +5,7 @@ import { ModelViewer } from '../components/ModelViewer';
 import { ModelViewerSkeleton } from '../components/SkeletonLoader';
 import { useDebouncedCallback } from '../hooks/useDebounce';
 import { resolveAssetUrl, formatDate } from '../utils/helpers';
+import { loadModelGlbBuffer } from '../utils/loadModelGlb';
 import { Toast } from '../components/Toast';
 import { ArrowLeft, Box, Copy, ExternalLink, ShieldCheck, Check, Calendar, CornerDownRight } from 'lucide-react';
 
@@ -26,17 +27,20 @@ export const ViewerPage = () => {
       try {
         setLoading(true);
         setModelBlobUrl(null);
-        const [modelRes, stateRes, glbRes] = await Promise.all([
+        const [modelRes, stateRes] = await Promise.all([
           api.get(`/models/${id}`),
           api.get(`/models/${id}/state`),
-          api.get(`/models/${id}/stream`, { responseType: 'arraybuffer' }),
         ]);
         if (cancelled) return;
 
         setModel(modelRes.data);
         setInitialState(stateRes.data);
+
+        const glbBuffer = await loadModelGlbBuffer(id, modelRes.data.modelUrl);
+        if (cancelled) return;
+
         blobUrl = URL.createObjectURL(
-          new Blob([glbRes.data], { type: 'model/gltf-binary' })
+          new Blob([glbBuffer], { type: 'model/gltf-binary' })
         );
         setModelBlobUrl(blobUrl);
       } catch (err) {
@@ -85,8 +89,8 @@ export const ViewerPage = () => {
   const handleDownload = async () => {
     if (!model) return;
     try {
-      const response = await api.get(`/models/${id}/stream`, { responseType: 'arraybuffer' });
-      const blob = new Blob([response.data], { type: 'model/gltf-binary' });
+      const buffer = await loadModelGlbBuffer(id, model.modelUrl);
+      const blob = new Blob([buffer], { type: 'model/gltf-binary' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.style.display = 'none';
