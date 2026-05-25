@@ -1,6 +1,7 @@
-import React, { Suspense, useRef, useEffect, useState } from 'react';
+import React, { Suspense, useRef, useEffect, useState, useCallback } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { OrbitControls, useGLTF, Center, Html } from '@react-three/drei';
+import { OrbitControls, Center, Html } from '@react-three/drei';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RotateCcw, Play, Pause, Grid, Sun, Loader2, Maximize } from 'lucide-react';
 
 // Loader helper inside canvas
@@ -15,32 +16,42 @@ function CanvasLoader() {
   );
 }
 
-// Model component
+// Model component — GLTFLoader gives reliable error callbacks (no Suspense try/catch)
 function Model({ url, onLoadError }) {
-  try {
-    const { scene } = useGLTF(url);
-    // Auto-compute shadows and clean materials
-    useEffect(() => {
-      scene.traverse((child) => {
-        if (child.isMesh) {
-          child.castShadow = true;
-          child.receiveShadow = true;
-        }
-      });
-    }, [scene]);
+  const [scene, setScene] = useState(null);
 
-    return <primitive object={scene} dispose={null} />;
-  } catch (err) {
-    onLoadError(err.message || 'Failed to load GLB model.');
-    return (
-      <Html center>
-        <div className="text-center p-6 rounded-2xl bg-neutral-950/80 border border-rose-500/20 max-w-sm text-rose-400">
-          <p className="font-bold text-base">Geometry Load Error</p>
-          <p className="text-xs text-neutral-400 mt-2">{err.message}</p>
-        </div>
-      </Html>
+  useEffect(() => {
+    let cancelled = false;
+    setScene(null);
+    const loader = new GLTFLoader();
+
+    loader.load(
+      url,
+      (gltf) => {
+        if (cancelled) return;
+        gltf.scene.traverse((child) => {
+          if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        });
+        setScene(gltf.scene);
+      },
+      undefined,
+      (error) => {
+        if (!cancelled) {
+          onLoadError(error?.message || 'Failed to load GLB model.');
+        }
+      }
     );
-  }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [url, onLoadError]);
+
+  if (!scene) return null;
+  return <primitive object={scene} dispose={null} />;
 }
 
 // Inner scene manager to align camera & sync changes
@@ -165,6 +176,14 @@ export const ModelViewer = ({ modelUrl, initialState, onStateChange, isSaving })
   const [showGrid, setShowGrid] = useState(true);
   const [autoRotate, setAutoRotate] = useState(false);
   const [loadError, setLoadError] = useState(null);
+
+  const handleLoadError = useCallback((message) => {
+    setLoadError(message);
+  }, []);
+
+  useEffect(() => {
+    setLoadError(null);
+  }, [modelUrl]);
 
   // Resets OrbitControls and Camera back to their default vantage points
   const handleResetCamera = () => {
@@ -309,7 +328,7 @@ export const ModelViewer = ({ modelUrl, initialState, onStateChange, isSaving })
               lightingProfile={lightingProfile}
               showGrid={showGrid}
               autoRotate={autoRotate}
-              onLoadError={(err) => setLoadError(err)}
+              onLoadError={handleLoadError}
             />
           </Suspense>
         </Canvas>

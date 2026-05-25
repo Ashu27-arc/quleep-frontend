@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../services/api';
 import { ModelViewer } from '../components/ModelViewer';
@@ -11,36 +11,50 @@ import { ArrowLeft, Box, Copy, ExternalLink, ShieldCheck, Check, Calendar, Corne
 export const ViewerPage = () => {
   const { id } = useParams();
   const [model, setModel] = useState(null);
-  const [signedModelUrl, setSignedModelUrl] = useState(null);
+  const [modelBlobUrl, setModelBlobUrl] = useState(null);
   const [initialState, setInitialState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
   const [copied, setCopied] = useState(false);
 
-  const fetchModelAndState = useCallback(async () => {
-    try {
-      setLoading(true);
-      const [modelRes, stateRes, signedRes] = await Promise.all([
-        api.get(`/models/${id}`),
-        api.get(`/models/${id}/state`),
-        api.get(`/models/${id}/signed-url`),
-      ]);
-      setModel(modelRes.data);
-      setInitialState(stateRes.data);
-      // Use the pre-signed URL so Three.js can fetch the private S3 asset
-      setSignedModelUrl(resolveAssetUrl(signedRes.data.signedUrl || modelRes.data.modelUrl));
-    } catch (err) {
-      console.error('Error fetching model context:', err);
-      setToastMessage({ message: 'Failed to stream 3D object details.', type: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  }, [id]);
-
   useEffect(() => {
+    let cancelled = false;
+    let blobUrl = null;
+
+    const fetchModelAndState = async () => {
+      try {
+        setLoading(true);
+        setModelBlobUrl(null);
+        const [modelRes, stateRes, glbRes] = await Promise.all([
+          api.get(`/models/${id}`),
+          api.get(`/models/${id}/state`),
+          api.get(`/models/${id}/stream`, { responseType: 'arraybuffer' }),
+        ]);
+        if (cancelled) return;
+
+        setModel(modelRes.data);
+        setInitialState(stateRes.data);
+        blobUrl = URL.createObjectURL(
+          new Blob([glbRes.data], { type: 'model/gltf-binary' })
+        );
+        setModelBlobUrl(blobUrl);
+      } catch (err) {
+        console.error('Error fetching model context:', err);
+        if (!cancelled) {
+          setToastMessage({ message: 'Failed to stream 3D object details.', type: 'error' });
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
     fetchModelAndState();
-  }, [fetchModelAndState]);
+    return () => {
+      cancelled = true;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  }, [id]);
 
   const saveStateToDB = useDebouncedCallback(async (stateData) => {
     setIsSaving(true);
@@ -71,11 +85,8 @@ export const ViewerPage = () => {
   const handleDownload = async () => {
     if (!model) return;
     try {
-      // Use the signed URL for the actual download fetch (private S3 requires authentication)
-      const fileUrl = signedModelUrl || resolveAssetUrl(model.modelUrl);
-      const response = await fetch(fileUrl);
-      if (!response.ok) throw new Error('Network response was not ok');
-      const blob = await response.blob();
+      const response = await api.get(`/models/${id}/stream`, { responseType: 'arraybuffer' });
+      const blob = new Blob([response.data], { type: 'model/gltf-binary' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.style.display = 'none';
@@ -115,8 +126,24 @@ export const ViewerPage = () => {
     );
   }
 
-  // Use the pre-signed S3 URL (avoids 403 on private buckets); fallback to resolved URL
-  const finalModelUrl = signedModelUrl || resolveAssetUrl(model.modelUrl);
+  if (!modelBlobUrl) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-neutral-950 text-neutral-100 rounded-3xl min-h-[500px]">
+        <h3 className="text-lg font-bold text-neutral-200">Geometry Loading Failed</h3>
+        <p className="text-xs text-neutral-500 mt-1 max-w-xs mx-auto">
+          Could not load the GLB asset from storage. Try re-uploading the model.
+        </p>
+        <Link
+          to="/"
+          className="mt-6 px-5 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-semibold rounded-2xl border border-neutral-800 transition"
+        >
+          Return to Dashboard
+        </Link>
+      </div>
+    );
+  }
+
+  const finalModelUrl = modelBlobUrl;
 
   return (
     <div className="flex-1 flex flex-col gap-6 animate-fade-in relative z-10">
